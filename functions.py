@@ -537,5 +537,57 @@ def highlight_date_filtered_rows(df, date_filtered, column_name="NEName"):
      
 
         # Display filtered data for common NEName values
+import openai        
+
+def chat():
+    st.title("Upload Two Files for Comparison and Ask Questions")
+
+    # File upload section for two files
+    uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+
+    if uploaded_files and len(uploaded_files) == 2:
+        # Read both files into dataframes
+        df1 = pd.read_csv(uploaded_files[0])
+        df2 = pd.read_csv(uploaded_files[1])
+
+        st.write(f"Contents of {uploaded_files[0].name}:")
+        st.write(df1)
+        st.write(f"Contents of {uploaded_files[1].name}:")
+        st.write(df2)
+
+        # Compare the two dataframes and find common and different values
+        common_df, diff_file1_df, diff_file2_df = compare_nename_columns(df1, df2, "NEName")
         
-   
+        st.write("### Common NEName Values:")
+        st.write(common_df)
+
+        st.write("### NEName Values in File 1 but not in File 2:")
+        st.write(diff_file1_df)
+
+        st.write("### NEName Values in File 2 but not in File 1:")
+        st.write(diff_file2_df)
+
+        # Set your Azure OpenAI key and endpoint
+        openai.api_type = "azure"
+        openai.api_key = "25117d14b1574833b0995c5c5a873ff5"
+        openai.api_base = "https://nice.openai.azure.com/"
+        openai.api_version = "2023-05-15"
+
+        def ask_azure_openai(question, context):
+            response = openai.Completion.create(
+                engine="inventory_gpt",  # Ensure this matches your deployment name in Azure
+                prompt=f"{context}\n\nQuestion: {question}",
+                max_tokens=150
+            )
+            return response.choices[0].text.strip()
+
+        question = st.text_input("Ask a question related to the comparison")
+
+        if question:
+            # Use the comparison results as context for the question
+            context = f"Common NEName values:\n{common_df.to_string()}\n\nNEName values in File 1 but not in File 2:\n{diff_file1_df.to_string()}\n\nNEName values in File 2 but not in File 1:\n{diff_file2_df.to_string()}"
+            answer = ask_azure_openai(question, context)
+            st.write(f"Answer: {answer}")
+
+    else:
+        st.warning("Please upload exactly two CSV files.")
