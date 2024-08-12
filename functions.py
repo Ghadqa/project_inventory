@@ -539,6 +539,31 @@ def highlight_date_filtered_rows(df, date_filtered, column_name="NEName"):
         # Display filtered data for common NEName values
 import openai        
 
+import streamlit as st
+import pandas as pd
+import openai
+
+def compare_nename_columns(df1, df2, column_name):
+    # Ensure both dataframes have the specified column
+    if column_name not in df1.columns or column_name not in df2.columns:
+        st.error(f"Column '{column_name}' not found in one or both files.")
+        return None, None, None
+    
+    # Find common and differing values
+    common_values = pd.merge(df1[[column_name]], df2[[column_name]], on=column_name)
+    diff_file1 = df1[~df1[column_name].isin(common_values[column_name])]
+    diff_file2 = df2[~df2[column_name].isin(common_values[column_name])]
+    
+    return common_values, diff_file1, diff_file2
+
+def ask_azure_openai(question, context):
+    response = openai.Completion.create(
+        engine="inventory_gpt",  # Ensure this matches your deployment name in Azure
+        prompt=f"{context}\n\nQuestion: {question}",
+        max_tokens=150
+    )
+    return response.choices[0].text.strip()
+
 def chat():
     st.title("Upload Two Files for Comparison and Ask Questions")
 
@@ -558,36 +583,52 @@ def chat():
         # Compare the two dataframes and find common and different values
         common_df, diff_file1_df, diff_file2_df = compare_nename_columns(df1, df2, "NEName")
         
-        st.write("### Common NEName Values:")
-        st.write(common_df)
+        if common_df is not None:
+            st.write("### Common NEName Values:")
+            st.write(common_df)
 
-        st.write("### NEName Values in File 1 but not in File 2:")
-        st.write(diff_file1_df)
+            st.write("### NEName Values in File 1 but not in File 2:")
+            st.write(diff_file1_df)
 
-        st.write("### NEName Values in File 2 but not in File 1:")
-        st.write(diff_file2_df)
+            st.write("### NEName Values in File 2 but not in File 1:")
+            st.write(diff_file2_df)
 
-        # Set your Azure OpenAI key and endpoint
-        openai.api_type = "azure"
-        openai.api_key = "25117d14b1574833b0995c5c5a873ff5"
-        openai.api_base = "https://nice.openai.azure.com/"
-        openai.api_version = "2023-05-15"
+            # Set your Azure OpenAI key and endpoint
+            openai.api_type = "azure"
+            openai.api_key = "25117d14b1574833b0995c5c5a873ff5"
+            openai.api_base = "https://nice.openai.azure.com/"
+            openai.api_version = "2023-05-15"
 
-        def ask_azure_openai(question, context):
-            response = openai.Completion.create(
-                engine="inventory_gpt",  # Ensure this matches your deployment name in Azure
-                prompt=f"{context}\n\nQuestion: {question}",
-                max_tokens=150
-            )
-            return response.choices[0].text.strip()
+            question = st.text_input("Ask a question related to the comparison")
 
-        question = st.text_input("Ask a question related to the comparison")
+            if question:
+                file1_head = df1.head().to_string(index=False)
+                file2_head = df2.head().to_string(index=False)
+                file1_summary = df1.describe().to_string()
+                file2_summary = df2.describe().to_string()
+                # Use the comparison results as context for the question
+                context = f"Common NEName values:\n{common_df.to_string(index=False)}\n\n" \
+                          f"NEName values in File 1 but not in File 2:\n{diff_file1_df.to_string(index=False)}\n\n" \
+                          f"NEName values in File 2 but not in File 1:\n{diff_file2_df.to_string(index=False)}\n\n" \
+                          f"First few rows of File 1:\n{file1_head}\n\n" \
+                          f"First few rows of File 2:\n{file2_head}\n\n" \
+                          f"Summary of File 1:\n{file1_summary}\n\n" \
+                          f"Summary of File 2:\n{file2_summary}"
+                # Limit context size if necessary
+                if len(context) > 4000:  # Adjust based on token limit and size of responses
+                    context = context[:4000] + "\n[Content truncated due to size.]"
 
-        if question:
-            # Use the comparison results as context for the question
-            context = f"Common NEName values:\n{common_df.to_string()}\n\nNEName values in File 1 but not in File 2:\n{diff_file1_df.to_string()}\n\nNEName values in File 2 but not in File 1:\n{diff_file2_df.to_string()}"
-            answer = ask_azure_openai(question, context)
-            st.write(f"Answer: {answer}")
+                answer = ask_azure_openai(question, context)
+                st.write(f"Answer: {answer}")
 
     else:
         st.warning("Please upload exactly two CSV files.")
+
+def format_response(df, query):
+    # Filter the dataframe based on the query (e.g., 'NAB_0014_LM')
+    result_df = df[df['NEFdn'].str.contains(query, na=False, case=False)]
+    
+    if not result_df.empty:
+        return result_df[['Board_Name', 'NEFdn']].to_string(index=False)
+    else:
+        return "No matching data found."
