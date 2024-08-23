@@ -11,7 +11,8 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from functions import show_compare, show_dashboard1, chat
+from functions import  show_dashboard1, chat
+from test2 import show_compare
 st.set_page_config(page_title="Inventory Dashboard", page_icon=":bar_chart:", layout="wide")
 def main():
     # Barre latérale pour la navigation
