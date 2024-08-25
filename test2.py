@@ -11,6 +11,11 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
+import streamlit as st 
+import pandas as pd
+import openai
+import logging
+import datetime
 
 import numpy as np
 def show_compare():
@@ -261,4 +266,243 @@ def show_compare():
             
 
                     
-                    
+
+
+def chat():
+    st.title("Upload Two Files for Comparison and Ask Questions")
+
+    # File upload section for two files
+    uploaded_files = st.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+
+    if uploaded_files and len(uploaded_files) == 2:
+        try:
+            # Read both files into dataframes
+            df1 = pd.read_csv(uploaded_files[0])
+            df2 = pd.read_csv(uploaded_files[1])
+
+            st.write(f"Contents of {uploaded_files[0].name}:")
+            st.write(df1)
+            st.write(f"Contents of {uploaded_files[1].name}:")
+            st.write(df2)
+
+            # Compare the two dataframes and find common and different values
+            common_df, diff_file1_df, diff_file2_df = compare_nename_columns(df1, df2, "NEName")
+
+            if common_df is not None:
+                st.write("### Common NEName Values:")
+                st.write(common_df)
+
+                st.write("### NEName Values in File 1 but not in File 2:")
+                st.write(diff_file1_df)
+
+                st.write("### NEName Values in File 2 but not in File 1:")
+                st.write(diff_file2_df)
+
+                # Set your Azure OpenAI key and endpoint
+                openai.api_type = "azure"
+                openai.api_key = "25117d14b1574833b0995c5c5a873ff5"
+                openai.api_base = "https://nice.openai.azure.com/"
+                openai.api_version = "2023-05-15"
+
+                question = st.text_input("Ask a question related to the comparison")
+
+                if question:
+                    try:
+                        answer = ask_openai_with_chunks(question, diff_file1_df, diff_file2_df,common_df, chunk_size=100)
+                        st.write(f"Answer: {answer}")
+                        logging.info(f"Question: {question} | Answer: {answer}")
+                    except Exception as e:
+                        st.error("There was an issue with processing your question.")
+                        logging.error(f"Error processing question: {question} | Exception: {str(e)}")
+        except Exception as e:
+            st.error("There was an error processing the files.")
+            logging.error(f"Error processing files: {str(e)}")
+    else:
+        st.warning("Please upload exactly two CSV files.")
+        logging.warning("User did not upload exactly two CSV files.")
+
+
+def filter_question(question, df):
+    # Simple example to detect if a question is related to the data
+    keywords = ["boards", "inventory", "date"]
+    if any(keyword in question.lower() for keyword in keywords):
+        return True
+    return False
+def ask_openai_with_chunks(question: str, df1: pd.DataFrame, df2: pd.DataFrame, df3: pd.DataFrame, chunk_size: int) -> str:
+    """
+    Queries Azure OpenAI with data chunks and handles specific questions about added/recovered boards.
+
+    Args:
+    - question (str): The question to ask.
+    - df1 (pd.DataFrame): The DataFrame containing data for added boards.
+    - df2 (pd.DataFrame): The DataFrame containing data for recovered boards.
+    - chunk_size (int): The number of rows per chunk.
+
+    Returns:
+    - str: The combined answer from all chunks.
+    """
+
+    if "new boards with more recent manufacture dates" in question.lower():
+        post_dates_df = compare_dates_later(df1, df2, "Date_Of_Manufacture")
+        
+        if not post_dates_df.empty:
+            boards_info = [
+                f"NEName: {row['NEName']}, Board: {row['Board Name']}, SN: {row['s']}, Date: {row['Date_Of_Manufacture'].strftime('%Y-%m-%d')}"
+                for _, row in post_dates_df.iterrows()
+            ]
+            return f"The new boards with more recent manufacture dates in File 2 are:\n" + "\n".join(boards_info)
+        else:
+            return "No new boards with more recent manufacture dates found in File 2."
+    
+    if "boards on date" in question.lower():
+        df1['Date_Of_Manufacture'] = pd.to_datetime(df1['Date_Of_Manufacture'], errors='coerce').fillna(pd.Timestamp.min)
+        df2['Date_Of_Manufacture'] = pd.to_datetime(df2['Date_Of_Manufacture'], errors='coerce').fillna(pd.Timestamp.min)
+        
+        filter_option = st.sidebar.selectbox("Choose date filter type", ["Single Date", "Date Range"])
+
+        if filter_option == "Single Date":
+            selected_date = st.sidebar.date_input("Select a date", min_value=datetime(2000, 1, 1), max_value=datetime(2100, 12, 31))
+            filtered_df1 = df1[df1['Date_Of_Manufacture'] == pd.to_datetime(selected_date)]
+            filtered_df2 = df2[df2['Date_Of_Manufacture'] == pd.to_datetime(selected_date)]
+            
+            if not filtered_df1.empty or not filtered_df2.empty:
+                boards_info = [
+                    f"NEName: {row['NEName']}, Board: {row['Board Name']}, SN: {row['sn_bar_code']}, Date: {row['Date_Of_Manufacture'].strftime('%Y-%m-%d')}"
+                    for _, row in pd.concat([filtered_df1, filtered_df2]).iterrows()
+                ]
+                return f"The boards manufactured on {selected_date.strftime('%Y-%m-%d')} are:\n" + "\n".join(boards_info)
+            else:
+                return f"No boards found on {selected_date.strftime('%Y-%m-%d')}."
+        
+        elif filter_option == "Date Range":
+            start_date = st.sidebar.date_input("Select start date", min_value=datetime(2000, 1, 1), max_value=datetime(2100, 12, 31))
+            end_date = st.sidebar.date_input("Select end date", min_value=datetime(2000, 1, 1), max_value=datetime(2100, 12, 31))
+            filtered_df1 = df1[(df1['Date_Of_Manufacture'] >= pd.to_datetime(start_date)) & (df1['Date_Of_Manufacture'] <= pd.to_datetime(end_date))]
+            filtered_df2 = df2[(df2['Date_Of_Manufacture'] >= pd.to_datetime(start_date)) & (df2['Date_Of_Manufacture'] <= pd.to_datetime(end_date))]
+
+            if not filtered_df1.empty or not filtered_df2.empty:
+                boards_info = [
+                    f"NEName: {row['NEName']}, Board: {row['Board_Name']}, SN: {row['sn_bar_code']}, Date: {row['Date_Of_Manufacture'].strftime('%Y-%m-%d')}"
+                    for _, row in pd.concat([filtered_df1, filtered_df2]).iterrows()
+                ]
+                return f"The boards manufactured between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')} are:\n" + "\n".join(boards_info)
+            else:
+                return f"No boards found between {start_date.strftime('%Y-%m-%d')} and {end_date.strftime('%Y-%m-%d')}."
+
+    elif "how many boards added" in question.lower():
+        return f"There are {len(df2)} boards added."
+    
+    elif "which boards added" in question.lower():
+        added_boards = df2[["NEName", "Board Name"]]
+        st.write("### Added Boards Information")
+        st.dataframe(added_boards)
+        return ""
+        
+    elif "how many boards recovered" in question.lower():
+        return f"There are {len(df1)} boards to be recovered."
+    
+    elif "which boards recovered" in question.lower():
+        recovered_boards = df1[["NEName","PN (BOM Code/Item)","Board Name"]]
+        st.write("### Recovered Boards Information")
+        st.dataframe(recovered_boards)
+        return ""
+    
+    elif "give me information about new sites" in question.lower():
+        new_sites_info = df2[["NEName", "Board_Name", "Date_Of_Manufacture"]]
+        return new_sites_info.to_string(index=False)
+    
+    elif "how many boards new site nename=" in question.lower():
+        nename_value = question.split('=')[-1].strip().upper()
+        filtered_df = df2[df2['NEName'] == nename_value]
+        
+
+        if not filtered_df.empty:
+            board_count = len (filtered_df['Board_Name'])
+            st.write(f"There are {board_count} boards in NEName = {nename_value}")
+            st.dataframe(filtered_df[["Board_Name", "Board Type"]])
+        else:
+            st.write(f"No boards found for NEName = {nename_value}")
+
+    elif "new site " in question.lower(): 
+        new_site = set(df2["NEName"])
+        return ', '.join(new_site)
+
+   
+   
+    
+    chunks = chunk_dataframe(df1, chunk_size)
+    answers = []
+    for chunk in chunks:
+        context = chunk.head(5).to_dict()  # Convert a portion to avoid excessive context
+        prompt = f"Based on the following data: {context}, {question}"
+        
+        try:
+            response = openai.Completion.create(
+                engine="inventory_gpt",
+                prompt=prompt,
+                max_tokens=150
+            )
+            answers.append(response.choices[0].text.strip())
+        except Exception as e:
+            answers.append(f"Error: {str(e)}")
+
+    return "\n".join(answers)
+
+def compare_nename_columns(df1: pd.DataFrame, df2: pd.DataFrame, column_name: str) -> tuple:
+    """
+    Compare NEName columns of two dataframes and find common and different values.
+
+    Args:
+    - df1 (pd.DataFrame): The first dataframe.
+    - df2 (pd.DataFrame): The second dataframe.
+    - column_name (str): The column to compare.
+
+    Returns:
+    - tuple: A tuple containing dataframes with common values, values in df1 not in df2, and values in df2 not in df1.
+    """
+    common = df1[df1[column_name].isin(df2[column_name])]
+    diff_file1 = df1[~df1[column_name].isin(df2[column_name])]
+    diff_file2 = df2[~df2[column_name].isin(df1[column_name])]
+    return common, diff_file1, diff_file2
+
+def chunk_dataframe(df: pd.DataFrame, chunk_size: int) -> list:
+    """
+    Splits a DataFrame into smaller chunks.
+
+    Args:
+    - df (pd.DataFrame): The DataFrame to split.
+    - chunk_size (int): The number of rows per chunk.
+
+    Returns:
+    - list: A list of DataFrame chunks.
+    """
+    return [df[i:i + chunk_size] for i in range(0, df.shape[0], chunk_size)]
+
+def get_recovered_boards(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
+    """
+    Identify boards that are present in the old inventory but missing from the new inventory.
+
+    Args:
+    - df1 (pd.DataFrame): The old inventory dataframe.
+    - df2 (pd.DataFrame): The new inventory dataframe.
+
+    Returns:
+    - pd.DataFrame: A dataframe containing boards to be recovered.
+    """
+    # Find boards in the old inventory that are not in the new inventory
+    recovered_boards = df1[~df1["NEName"].isin(df2["NEName"])]
+
+    return recovered_boards
+
+def convert_to_datetime(df, column_name):
+    df[column_name] = pd.to_datetime(df[column_name])
+    return df
+def compare_dates_later(db_df, new_df, column_name):
+    # Convertir les colonnes de dates en format datetime, si ce n'est déjà fait
+    db_df[column_name] = pd.to_datetime(db_df[column_name], errors='coerce')
+    new_df[column_name] = pd.to_datetime(new_df[column_name], errors='coerce')
+
+    # Filtrer les entrées de new_df qui ont une date postérieure à celle de db_df
+    post_dates = new_df[new_df[column_name] > db_df[column_name].max()]
+    
+    return post_dates
