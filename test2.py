@@ -107,7 +107,7 @@ def show_compare():
         st.dataframe(combined_df)
         excel_file_path = "/home/poste1/inventory_compare/combined_data.xlsx"
         combined_df.to_excel(excel_file_path, index=False, engine='openpyxl')
-        #st.success(f"Combined data saved to {excel_file_path}")
+        st.success(f"Combined data saved to {excel_file_path}")
 
         # Prepare data for histogram
         histogram_data = combined_df[['PN(BOM Code/Item)', 'Board Name', 'new site', 'refresh']].melt(

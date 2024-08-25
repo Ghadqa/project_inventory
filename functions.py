@@ -8,12 +8,11 @@ import pandas as pd
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
+from email.mime.base import MIMEBases
 from email import encoders
 from datetime  import datetime
 import streamlit as st
 import pandas as pd
-from azure.storage.blob import BlobServiceClient
 from io import BytesIO
 from tenacity import retry, wait_exponential, stop_after_attempt
 from concurrent.futures import ThreadPoolExecutor

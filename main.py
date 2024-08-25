@@ -11,7 +11,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
-from functions import  show_dashboard1, chat
+from functions import   chat
 from test2 import show_compare
 st.set_page_config(page_title="Inventory Dashboard", page_icon=":bar_chart:", layout="wide")
 def main():
@@ -23,8 +23,7 @@ def main():
    
     if page =="compare data": 
         show_compare()
-    elif page =="visualize data": 
-        show_dashboard1()
+   
     elif page=="ask chat":
          chat()
         
