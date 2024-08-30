@@ -1,8 +1,6 @@
 pandas
 streamlit
 plotly
-pdfkit
-jinja2
 numpy
-psycopg2
-
+StringIO
+re
