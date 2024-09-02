@@ -3,4 +3,6 @@ streamlit
 plotly
 numpy
 StringIO
+ numpy 
 re
+io   
