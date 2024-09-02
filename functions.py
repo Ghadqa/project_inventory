@@ -5,9 +5,6 @@ import streamlit as st
 import numpy as np
 import re
 from io import BytesIO  
-
-
-
 def extract_band_info(manufacture_data):
     """
     Extract TX and RX frequency ranges from manufacture data and return them as numeric intervals.
@@ -108,14 +105,8 @@ def show_compare():
         new_boards = df2[~df2['PN(BOM Code/Item)'].isin(df1['PN(BOM Code/Item)'])]
 
     
-        old_sites = df1[~df1['NEName'].isin(df2['NEName'])]
 
-        old_boards = df1[~df1['PN(BOM Code/Item)'].isin(df2['PN(BOM Code/Item)'])]
 
-        old_boards['Band_Info'] = old_boards['Manufacturer Data'].apply(lambda x: extract_band_info(x)[0] if x else None)
-        extrait_old = old_boards[['Board Name', 'PN(BOM Code/Item)', 'Band_Info', 'Date Of Manufacture']]
-        st.write("### Old Items Information")
-        st.write(extrait_old)
 
         new_boards_newsite = new_boards[new_boards['NEName'].isin(newsite['NEName'])]
 
@@ -123,26 +114,20 @@ def show_compare():
         dismantled_boards = df2[df2['PN(BOM Code/Item)'].isin(df1['PN(BOM Code/Item)'])]
         dismantled_boards_info = dismantled_boards[['Board Name', 'PN(BOM Code/Item)', 'Date Of Manufacture', 'Manufacturer Data']].drop_duplicates()
         dismantled_boards_info['Band_Info'] = dismantled_boards_info['Manufacturer Data'].apply(lambda x: extract_band_info(x)[0] if x else None)
-        st.write("### dismantled  Items Information")
+        st.write("### Dismantled Items Information")
         st.write(dismantled_boards_info)
         newsite['Band_Info'] = newsite['Manufacturer Data'].apply(lambda x: extract_band_info(x)[0] if x else None)
 
         newsite['Category'] = np.nan
 
+        #---------new items in neww site= new ------#
         newsite.loc[newsite['NEName'].isin(new_boards_newsite['NEName']), 'Category'] = 'new'
 
-        #
+
         rru_boards = newsite[newsite['Board Name'].str.startswith(('RRU', 'MRRU', 'LRRU'))]
 
         def update_category_for_board(row, matching_rrus, category):
-            """
-            Updates the category of a board based on frequency bands.
-
-            Args:
-            - row: Current RRU board row.
-            - matching_rrus: DataFrame containing matching old RRU boards.
-            - category: Category to assign ('refresh' or 'extension').
-            """
+           
             tx_range_old, rx_range_old = extract_band_info(row['Manufacturer Data'])
 
           
@@ -167,88 +152,141 @@ def show_compare():
                 update_category_for_board(row, matching_rrus, 'refresh')
             else:
                 newsite.at[row.name, 'Category'] = 'extension'
+        bbp_boards = newsite[newsite['Board Name'].str.startswith('BBP')]
+        for _, row in bbp_boards.iterrows():
+            # Extract band information for the current BBP board
+            board_band_info = extract_band_info(row['Manufacturer Data'])[0]
+            
+            # Check if there's a matching dismantled WBBP or LBBP with the same PN and band info
+            matching_bbp = dismantled_boards_info[
+                (dismantled_boards_info['PN(BOM Code/Item)'] == row['PN(BOM Code/Item)']) &
+                (dismantled_boards_info['Band_Info'] == board_band_info) &
+                dismantled_boards_info['Board Name'].str.startswith(('WBBP', 'LBBP'))
+            ]
+            
+            if not matching_bbp.empty:
+                # If a matching dismantled WBBP/LBBP is found, categorize as 'refresh'
+                newsite.at[row.name, 'Category'] = 'refresh'
+            else:
+                # If no match is found, categorize as 'extension'
+                newsite.at[row.name, 'Category'] = 'extension'
 
-        st.write("### Final New Site Data with Categories")
+        st.write("### Inventory Tracking For New Sites ")
         extrait_refresh=newsite[['NEName', 'PN(BOM Code/Item)','Board Name', 'Date Of Manufacture', 'Category']]
         extrait_refresh['Description'] = extrait_refresh['Board Name'].map(boards_data)
 
-     
+            
 
         
         st.write(extrait_refresh)
-     
-        selected_site = st.sidebar.selectbox(
-            "Select Site Name (NEName) to view details for Final New Sites Data with Categories of Boards",
-            extrait_refresh['NEName'].unique()
-        )
+        # Group by PN(BOM Code/Item) and Date Of Manufacture for 'new' category
+        new_count = extrait_refresh[extrait_refresh['Category'] == 'new'].groupby(['PN(BOM Code/Item)', 'Date Of Manufacture','NEName']).size().reset_index(name='Count_New')
 
-        if selected_site:
+        # Group by PN(BOM Code/Item) and Date Of Manufacture for 'extension' category
+        extension_count = extrait_refresh[extrait_refresh['Category'] == 'extension'].groupby(['PN(BOM Code/Item)', 'Date Of Manufacture','NEName']).size().reset_index(name='Count_Extension')
+
+        # Group by PN(BOM Code/Item) and Date Of Manufacture for 'refresh' category
+        refresh_count = extrait_refresh[extrait_refresh['Category'] == 'refresh'].groupby(['PN(BOM Code/Item)', 'Date Of Manufacture','NEName']).size().reset_index(name='Count_Refresh')
+
+        # Merge the grouped data back into extrait_refresh
+        extrait_refresh = extrait_refresh.merge(new_count, on=['PN(BOM Code/Item)', 'Date Of Manufacture','NEName'], how='left')
+        extrait_refresh = extrait_refresh.merge(extension_count, on=['PN(BOM Code/Item)', 'Date Of Manufacture','NEName'], how='left')
+        extrait_refresh = extrait_refresh.merge(refresh_count, on=['PN(BOM Code/Item)', 'Date Of Manufacture','NEName'], how='left')
+
+   
+        extrait_refresh.fillna(0, inplace=True)
+       
+         # Classification of statuses
+        extrait_refresh['Status'] = np.where(
+            (extrait_refresh['Count_New'] > 0) & 
+            (extrait_refresh['Count_Refresh'] == 0) & 
+            (extrait_refresh['Count_Extension'] == 0), 'Added Only',
             
-            site_data = extrait_refresh[extrait_refresh['NEName'] == selected_site]
-            
-            st.write(f"### Boards for Site: {selected_site}")
-          
-               
-            new_count =site_data[site_data['Category'] == 'new'].groupby('PN(BOM Code/Item)').size().reset_index(name='Count_New')
-            extension_count = site_data[site_data['Category'] == 'extension'].groupby('PN(BOM Code/Item)').size().reset_index(name='Count_Extension')
-            refresh_count =site_data[site_data['Category'] == 'refresh'].groupby('PN(BOM Code/Item)').size().reset_index(name='Count_Refresh')
-            site_data = site_data.merge(new_count, on='PN(BOM Code/Item)', how='left')
-            site_data = site_data.merge(extension_count, on='PN(BOM Code/Item)', how='left')
-            site_data = site_data.merge(refresh_count, on='PN(BOM Code/Item)', how='left')
-            
-            
-            
-            site_data['Status'] = np.where(
-                (site_data['Count_New'] > 0) & (site_data['Count_Refresh'] == 0) & (site_data['Count_Extension'] == 0), 'Added Only',
+            np.where(
+                (extrait_refresh['Count_Refresh'] > 0) & 
+                (extrait_refresh['Count_New'] == 0) & 
+                (extrait_refresh['Count_Extension'] == 0), 'Dismantled Only',
+                
                 np.where(
-                    (site_data['Count_Refresh'] >0) & (site_data['Count_Extension'] > 0), 'Dismantled Only',
-                    'Both'
+                    (extrait_refresh['Count_Extension'] > 0) & 
+                    (extrait_refresh['Count_Refresh'] == 0) & 
+                    (extrait_refresh['Count_New'] == 0), 'Extension Only',
+                    
+                    np.where(
+                        (extrait_refresh['Count_Refresh'] > 0) & 
+                        (extrait_refresh['Count_Extension'] > 0) & 
+                        (extrait_refresh['Count_New'] > 0), 'Both',
+                        
+                        'Not Classified'  # For cases where none of the above conditions are met
+                    )
                 )
             )
-            site_data['Status_Numeric'] = site_data['Status'].map({
-                'Added Only': 1,
-                'Dismantled Only': 1,
-                'Both': 2
-            })
-            status_counts = site_data['Status'].value_counts().reset_index()
-            status_counts.columns = ['Status', 'Count']
+        )
+            
+     
+        st.write("### Final  Inventory Tracking  ")
+        st.dataframe(extrait_refresh[['Board Name','Date Of Manufacture','PN(BOM Code/Item)','Count_New','Count_Extension','Count_Refresh','Status']])
         
-            st.dataframe(site_data[['Board Name','Date Of Manufacture','PN(BOM Code/Item)', 'Category','Count_New','Count_Extension','Count_Refresh']])
-          
+                # Add a button to save the data to Excel
+        if st.button('Save to Excel'):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                extrait_refresh.to_excel(writer, sheet_name='Inventory Tracking', index=False)
+            output.seek(0)  # Move cursor to the start of the BytesIO object
+            st.download_button(
+                label="Download Excel file",
+                data=output.getvalue(),
+                file_name="final_inventory_tracking.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
                 
-            totals = {
-                'Nouveaux': site_data['Count_New'].sum(),
-                'Extension': site_data['Count_Extension'].sum(),
-                'Rafraîchissement': site_data['Count_Refresh'].sum()
+       
+        totals = {
+                'Nouveaux': extrait_refresh['Count_New'].sum(),
+                'Extension': extrait_refresh['Count_Extension'].sum(),
+                'Rafraîchissement': extrait_refresh['Count_Refresh'].sum()
             }
             
             
-            totals_df = pd.DataFrame(list(totals.items()), columns=['Catégorie', 'Total'])
+        totals_df = pd.DataFrame(list(totals.items()), columns=['Catégorie', 'Total'])
           
-            fig_totals_pie = px.pie(
+        fig_totals_pie = px.pie(
                 totals_df,
                 names='Catégorie',
                 values='Total',
-                title=f'Distribution of category items in {selected_site}',
+                title=f'Distribution of category items ',
                 labels={'Catégorie': 'Catégorie', 'Total': 'Nombre de Tableaux'}
             )
             
-            st.plotly_chart(fig_totals_pie)
-            site_data['Date Of Manufacture'] = pd.to_datetime(site_data['Date Of Manufacture'], errors='coerce')
-            year_options = site_data['Date Of Manufacture'].dt.year.unique()
-            selected_year = st.sidebar.selectbox('Select Year', sorted(year_options))
+        st.plotly_chart(fig_totals_pie)
+        extrait_refresh['Date Of Manufacture'] = pd.to_datetime(extrait_refresh['Date Of Manufacture'], errors='coerce')
+        year_options = extrait_refresh['Date Of Manufacture'].dt.year.unique()
+        selected_year = st.sidebar.selectbox('Select Year', sorted(year_options))
           
-            site_data_year = site_data[site_data['Date Of Manufacture'].dt.year == selected_year]
-            st.write(f"### Boards for the year {selected_year} in {selected_site} ")
-            st.dataframe(site_data_year[['Board Name', 'Date Of Manufacture', 'PN(BOM Code/Item)', 'Category', 'Count_New', 'Count_Extension', 'Count_Refresh']])
-          
-            melted_data = site_data_year.melt(id_vars=['Board Name', 'PN(BOM Code/Item)'], 
+        extrait_refresh_year = extrait_refresh[extrait_refresh['Date Of Manufacture'].dt.year == selected_year]
+        st.write(f"### Boards for the year {selected_year} ")
+        st.dataframe(extrait_refresh_year[['Board Name', 'Date Of Manufacture', 'PN(BOM Code/Item)', 'Category', 'Count_New', 'Count_Extension', 'Count_Refresh']])
+        st.write("If you want to save the inventory for the selected year, click the 'Save to Excel' button.")
+
+        # Use a unique key for the button
+        if st.button('Save to Excel', key='save_to_excel'):
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                extrait_refresh.to_excel(writer, sheet_name='Inventory Tracking', index=False)
+            output.seek(0)  # Move cursor to the start of the BytesIO object
+            st.download_button(
+                label="Download Excel file",
+                data=output.getvalue(),
+                file_name="final_inventory_tracking_for_selected_year.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        melted_data = extrait_refresh_year.melt(id_vars=['Board Name', 'PN(BOM Code/Item)'], 
                                             value_vars=['Count_New', 'Count_Extension', 'Count_Refresh'],
                                             var_name='Category',
                                             value_name='Count')
 
           
-            fig_board_histogram = px.bar(
+        fig_board_histogram = px.bar(
                 melted_data,
                 x='Board Name',
                 y='Count',
@@ -260,39 +298,31 @@ def show_compare():
             )
 
         
-            fig_board_histogram.update_traces(texttemplate='%{text}', textposition='inside')
+        fig_board_histogram.update_traces(texttemplate='%{text}', textposition='inside')
 
-            st.plotly_chart(fig_board_histogram)
+        st.plotly_chart(fig_board_histogram)
                
-        pn_options = site_data['PN(BOM Code/Item)'].unique()
+        pn_options = extrait_refresh['PN(BOM Code/Item)'].unique()
 
      
-        selected_option = st.sidebar.selectbox(
-            "Select PN(BOM Code/Item)on Final New Sites Data with Categories of Boards",
-            ["Select from list"] + list(pn_options)  
-        )
+        selected_pn = st.sidebar.selectbox(
+            "Select PN(BOM Code/Item) ",
+           pn_options)  
+    
 
-        if selected_option == "Select from list":
-          
-            manual_pn = st.sidebar.text_input("Enter PN(BOM Code/Item):", "")
-            selected_pn = manual_pn if manual_pn else None
-        else:
-            selected_pn = selected_option
+        
 
        
         if selected_pn:
-            filtered_by_pn = site_data[site_data['PN(BOM Code/Item)'] == selected_pn]
+            filtered_by_pn = extrait_refresh[extrait_refresh['PN(BOM Code/Item)'] == selected_pn]
 
             st.write(f"### Details for PN(BOM Code/Item): {selected_pn}")
             st.dataframe(filtered_by_pn)
         else:
             st.write("Please select or enter a PN(BOM Code/Item) to view details.")
-        
-                
+    
+    
 
-                    
-
-                
 
                     
                             
