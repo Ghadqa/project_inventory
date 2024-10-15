@@ -1,6 +1,6 @@
 pandas
-streamlit
 plotly
+streamlit
 numpy
-
- 
+jinja2
+pdfkit
